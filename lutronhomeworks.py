@@ -18,13 +18,13 @@ def normalizeAddress(address):
 class OutputMonitor(threading.Thread):
     def __init__(self, group=None, target=None, name=None,
                  args=(), kwargs=None, verbose=None):
-        threading.Thread.__init__(self, group=group, target=target, name=name,
-                                  verbose=verbose)
+        # adding verbose=verbose doesn't work??
+        threading.Thread.__init__(self, group=group, target=target, name=name)
         self.args = args
         self.kwargs = kwargs
-        print("Setting up serial: "+kwargs["file"]+" "+str(kwargs["baudrate"]))
         self.ser = serial.Serial(kwargs["file"], kwargs["baudrate"], timeout=0.5)
         self.serialLock = threading.Lock()
+        self.stopEvent = threading.Event()
         self.cachedValues = {}
         self.bufferedRead = ""
 
@@ -33,13 +33,13 @@ class OutputMonitor(threading.Thread):
         return
 
     def processLine(self, line):
-        parts = list(map(unicode.strip, line.split(',')))
+        parts = list(map(str.strip, line.split(',')))
         if len(parts) > 0:
             if parts[0] == "DL":
                 self.cachedValues[normalizeAddress(parts[1])] = int(parts[2])
 
     def run(self):
-        while True:
+        while not self.stopEvent.isSet():
             data_str = ""
             self.serialLock.acquire()
             try:
@@ -57,16 +57,17 @@ class OutputMonitor(threading.Thread):
     def writeData(self, str):
         self.serialLock.acquire()
         try:
-            print("Writing "+str)
             self.ser.write(str.encode('utf-8'))
         finally:
             self.serialLock.release()
+
+    def stop(self):
+        self.stopEvent.set()
 
 class LutronRS232:
     
     def __init__(self, file, baudrate=115200):
         self.serialManager = OutputMonitor(kwargs={'file': file, 'baudrate': baudrate})
-        self.serialManager.daemon = True
         self.serialManager.start()
 
     def setBrightness(self, address, brightness, fadeTime=1, delayTime=0):
@@ -81,7 +82,8 @@ class LutronRS232:
         # Also I only ever read in this thread, all writing is done in the other thread
         return self.serialManager.cachedValues[normalizeAddress(address)]
 
-        
+    def stop(self):
+        self.serialManager.stop()
 
 if __name__ == "__main__":
     import time
@@ -90,3 +92,4 @@ if __name__ == "__main__":
     time.sleep(2)
     lutron.setBrightness('1.4.2.8.1', 50)
     time.sleep(2)
+    lutron.stop()
