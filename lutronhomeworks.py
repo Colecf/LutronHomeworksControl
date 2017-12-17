@@ -1,5 +1,6 @@
 import serial
 import threading
+import time
 
 def normalizeSingleAddress(addr):
     result = ""
@@ -15,22 +16,24 @@ def normalizeAddress(address):
         return ",".join(list(map(normalizeSingleAddress, address)))
     return normalizeSingleAddress(address)
 
-class OutputMonitor(threading.Thread):
-    def __init__(self, group=None, target=None, name=None,
-                 args=(), kwargs=None, verbose=None):
-        # adding verbose=verbose doesn't work??
-        threading.Thread.__init__(self, group=group, target=target, name=name)
-        self.args = args
-        self.kwargs = kwargs
-        self.ser = serial.Serial(kwargs["file"], kwargs["baudrate"], timeout=0.5)
+class LutronRS232(threading.Thread):
+    
+    def __init__(self, file, baudrate=115200):
+        threading.Thread.__init__(self)
+        self.ser = serial.Serial(file, baudrate, timeout=0.5)
         self.serialLock = threading.Lock()
         self.stopEvent = threading.Event()
         self.cachedValues = {}
         self.bufferedRead = ""
-
-
         self.writeData("DLMON\r\n") # enable dimmer level monitoring
-        return
+        self.start()
+
+    def writeData(self, str):
+        self.serialLock.acquire()
+        try:
+            self.ser.write(str.encode('utf-8'))
+        finally:
+            self.serialLock.release()
 
     def processLine(self, line):
         parts = list(map(str.strip, line.split(',')))
@@ -54,25 +57,18 @@ class OutputMonitor(threading.Thread):
                 self.processLine(self.bufferedRead[:index])
                 self.bufferedRead = self.bufferedRead[index+1:]
 
-    def writeData(self, str):
-        self.serialLock.acquire()
-        try:
-            self.ser.write(str.encode('utf-8'))
-        finally:
-            self.serialLock.release()
-
-    def stop(self):
-        self.stopEvent.set()
-
-class LutronRS232:
-    
-    def __init__(self, file, baudrate=115200):
-        self.serialManager = OutputMonitor(kwargs={'file': file, 'baudrate': baudrate})
-        self.serialManager.start()
-
     def setBrightness(self, address, brightness, fadeTime=1, delayTime=0):
-        address = normalizeAddress(address)
-        self.serialManager.writeData('FADEDIM,'+str(brightness)+','+str(fadeTime)+','+str(delayTime)+','+address+'\r\n')
+        addressNormalized = normalizeAddress(address)
+        self.writeData('FADEDIM,'+str(brightness)+','+str(fadeTime)+','+str(delayTime)+','+addressNormalized+'\r\n')
+        if isinstance(address, list):
+            for a in address:
+                self.cachedValues[normalizeAddress(a)] = brightness
+        else:
+            self.cachedValues[addressNormalized] = brightness
+
+    def forceBrightnessUpdate(self, address, waitTime=0):
+        self.writeData('RDL,'+normalizeAddress(address)+'\r\n')
+        time.sleep(waitTime)
 
     def getBrightness(self, address):
         # I think accessing cachedValues is safe, because of this:
@@ -80,13 +76,12 @@ class LutronRS232:
         # https://pymotw.com/2/threading/#controlling-access-to-resources
         #
         # Also I only ever read in this thread, all writing is done in the other thread
-        return self.serialManager.cachedValues[normalizeAddress(address)]
+        return self.cachedValues[normalizeAddress(address)]
 
     def stop(self):
-        self.serialManager.stop()
+        self.stopEvent.set()
 
 if __name__ == "__main__":
-    import time
     lutron = LutronRS232('/dev/tty.usbserial')
     lutron.setBrightness('1.4.2.8.1', 0)
     time.sleep(2)
