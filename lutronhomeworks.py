@@ -62,9 +62,9 @@ class LutronRS232(threading.Thread):
         self.writeData('FADEDIM,'+str(brightness)+','+str(fadeTime)+','+str(delayTime)+','+addressNormalized+'\r\n')
         if isinstance(address, list):
             for a in address:
-                self.cachedValues[normalizeAddress(a)] = brightness
+                self.cachedValues[normalizeAddress(a)] = int(brightness)
         else:
-            self.cachedValues[addressNormalized] = brightness
+            self.cachedValues[addressNormalized] = int(brightness)
 
     def forceBrightnessUpdate(self, address, waitTime=0):
         self.writeData('RDL,'+normalizeAddress(address)+'\r\n')
