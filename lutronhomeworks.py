@@ -2,14 +2,21 @@ import serial
 import threading
 import time
 
+def stripLeadingZeros(num)
+    if(len(num) == 0):
+        return num
+    return str(int(num))
+
 def normalizeSingleAddress(addr):
-    result = ""
+    result = ''
+    latestNumber = ''
     for c in addr:
-        if ord(c) >= ord('1') and ord(c) <= ord('9'):
-            result += c
+        if ord(c) >= ord('0') and ord(c) <= ord('9'):
+            latestNumber += c
         elif c == '.' or c == ':' or c == '/' or c == '\\' or c == '-':
-            result += ':'
-    return result
+            result += stripLeadingZeros(latestNumber)+':'
+            latestNumber = ''
+    return result+stripLeadingZeros(latestNumber)
 
 def normalizeAddress(address):
     if isinstance(address, list):
