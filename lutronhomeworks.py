@@ -2,7 +2,7 @@ import serial
 import threading
 import time
 
-def stripLeadingZeros(num)
+def stripLeadingZeros(num):
     if(len(num) == 0):
         return num
     return str(int(num))
@@ -48,21 +48,23 @@ class LutronRS232(threading.Thread):
             if parts[0] == "DL":
                 self.cachedValues[normalizeAddress(parts[1])] = int(parts[2])
 
+    def read(self):
+        if (self.ser.inWaiting()>0):
+            self.bufferedRead += self.ser.read(self.ser.inWaiting()).decode('ascii')
+        index = self.bufferedRead.find('\r')
+        while index != -1:
+            self.processLine(self.bufferedRead[:index])
+            self.bufferedRead = self.bufferedRead[index+1:]
+            index = self.bufferedRead.find('\r')
+
     def run(self):
         while not self.stopEvent.isSet():
-            data_str = ""
             self.serialLock.acquire()
             try:
-                if (self.ser.inWaiting()>0):
-                    data_str = self.ser.read(self.ser.inWaiting()).decode('ascii')
+                self.read()
             finally:
                 self.serialLock.release()
             
-            self.bufferedRead += data_str
-            while self.bufferedRead.find('\r') != -1:
-                index = self.bufferedRead.find('\r')
-                self.processLine(self.bufferedRead[:index])
-                self.bufferedRead = self.bufferedRead[index+1:]
 
     def setBrightness(self, address, brightness, fadeTime=1, delayTime=0):
         addressNormalized = normalizeAddress(address)
@@ -83,7 +85,17 @@ class LutronRS232(threading.Thread):
         # https://pymotw.com/2/threading/#controlling-access-to-resources
         #
         # Also I only ever read in this thread, all writing is done in the other thread
-        return self.cachedValues[normalizeAddress(address)]
+        addressNormalized = normalizeAddress(address)
+        if addressNormalized not in self.cachedValues:
+            self.serialLock.acquire()
+            try:
+                self.ser.write(('RDL,'+addressNormalized+'\r\n').encode('utf-8'))
+                startTime = time.time()
+                while addressNormalized not in self.cachedValues and time.time() < startTime+1:
+                    self.read()
+            finally:
+                self.serialLock.release()
+        return self.cachedValues[addressNormalized]
 
     def stop(self):
         self.stopEvent.set()
