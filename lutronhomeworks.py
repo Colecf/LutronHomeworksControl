@@ -24,7 +24,6 @@ def normalizeAddress(address):
     return normalizeSingleAddress(address)
 
 class LutronRS232(threading.Thread):
-    
     def __init__(self, file, baudrate=115200):
         threading.Thread.__init__(self)
         self.ser = serial.Serial(file, baudrate, timeout=0.5)
@@ -91,10 +90,13 @@ class LutronRS232(threading.Thread):
             try:
                 self.ser.write(('RDL,'+addressNormalized+'\r\n').encode('utf-8'))
                 startTime = time.time()
-                while addressNormalized not in self.cachedValues and time.time() < startTime+1:
+                while addressNormalized not in self.cachedValues and time.time() < startTime+2:
                     self.read()
             finally:
                 self.serialLock.release()
+
+            if addressNormalized not in self.cachedValues:
+                raise RuntimeError("Couldn't get brightness for address "+addressNormalized)
         return self.cachedValues[addressNormalized]
 
     def stop(self):
@@ -102,8 +104,8 @@ class LutronRS232(threading.Thread):
 
 if __name__ == "__main__":
     lutron = LutronRS232('/dev/tty.usbserial')
-    lutron.setBrightness('1.4.2.8.1', 0)
     time.sleep(2)
-    lutron.setBrightness('1.4.2.8.1', 50)
+    lutron.setBrightness('1.4.2.7.3', 0)
     time.sleep(2)
+    lutron.setBrightness('1.4.2.7.3', 50)
     lutron.stop()
