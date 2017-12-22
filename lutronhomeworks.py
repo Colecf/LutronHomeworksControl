@@ -32,17 +32,34 @@ class LutronRS232(threading.Thread):
         self.stopEvent = threading.Event()
         self.cachedValues = {}
         self.bufferedRead = ""
+
+        # set this to be notified when a light changes
+        # note that it will call in a seperate thread, so
+        # any communication with your main code must be thread-safe
+        self.brightnessChangedCallback = None
+
         self.writeData("DLMON\r\n") # enable dimmer level monitoring
         self.start()
 
     def writeData(self, str):
         self.txQueue.put(str)
 
+    def setCachedBrightness(self, address, brightness):
+        if isinstance(address, list):
+            for a in address:
+                self.cachedValues[normalizeAddress(a)] = int(brightness)
+                if callable(self.brightnessChangedCallback):
+                    self.brightnessChangedCallback(normalizeAddress(a), int(brightness))
+        else:
+            self.cachedValues[normalizeAddress(address)] = int(brightness)
+            if callable(self.brightnessChangedCallback):
+                self.brightnessChangedCallback(normalizeAddress(address), int(brightness))
+
     def processLine(self, line):
         parts = list(map(str.strip, line.split(',')))
         if len(parts) > 0:
             if parts[0] == "DL":
-                self.cachedValues[normalizeAddress(parts[1])] = int(parts[2])
+                self.setCachedBrightness(parts[1], parts[2])
 
     def run(self):
         while not self.stopEvent.isSet():
@@ -60,11 +77,7 @@ class LutronRS232(threading.Thread):
     def setBrightness(self, address, brightness, fadeTime=1, delayTime=0):
         addressNormalized = normalizeAddress(address)
         self.writeData('FADEDIM,'+str(brightness)+','+str(fadeTime)+','+str(delayTime)+','+addressNormalized+'\r\n')
-        if isinstance(address, list):
-            for a in address:
-                self.cachedValues[normalizeAddress(a)] = int(brightness)
-        else:
-            self.cachedValues[addressNormalized] = int(brightness)
+        self.setCachedBrightness(address, brightness)
 
     def forceBrightnessUpdate(self, address):
         self.writeData('RDL,'+normalizeAddress(address)+'\r\n')
@@ -87,7 +100,9 @@ class LutronRS232(threading.Thread):
 
 if __name__ == "__main__":
     lutron = LutronRS232('/dev/tty.usbserial')
+    lutron.brightnessChangedCallback = lambda address, brightness: print(address+": "+str(brightness))
     lutron.setBrightness('1.4.2.7.3', 0)
     time.sleep(2)
     lutron.setBrightness('1.4.2.7.3', 50)
+    time.sleep(1)
     lutron.stop()
