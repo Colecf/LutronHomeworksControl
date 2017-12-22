@@ -78,7 +78,7 @@ class LutronRS232(threading.Thread):
         self.writeData('RDL,'+normalizeAddress(address)+'\r\n')
         time.sleep(waitTime)
 
-    def getBrightness(self, address):
+    def getBrightness(self, address, timeout=2):
         # I think accessing cachedValues is safe, because of this:
         # "Python's built-in data structures (lists, dictionaries, etc.) are thread-safe as a side-effect of having atomic byte-codes for manipulating them"
         # https://pymotw.com/2/threading/#controlling-access-to-resources
@@ -90,7 +90,7 @@ class LutronRS232(threading.Thread):
             try:
                 self.ser.write(('RDL,'+addressNormalized+'\r\n').encode('utf-8'))
                 startTime = time.time()
-                while addressNormalized not in self.cachedValues and time.time() < startTime+2:
+                while addressNormalized not in self.cachedValues and time.time() < startTime+timeout:
                     self.read()
             finally:
                 self.serialLock.release()
