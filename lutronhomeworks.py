@@ -1,6 +1,7 @@
 import serial
 import threading
 import time
+import queue
 
 def stripLeadingZeros(num):
     if(len(num) == 0):
@@ -27,7 +28,7 @@ class LutronRS232(threading.Thread):
     def __init__(self, file, baudrate=115200):
         threading.Thread.__init__(self)
         self.ser = serial.Serial(file, baudrate, timeout=0.5)
-        self.serialLock = threading.Lock()
+        self.txQueue = queue.Queue()
         self.stopEvent = threading.Event()
         self.cachedValues = {}
         self.bufferedRead = ""
@@ -35,11 +36,7 @@ class LutronRS232(threading.Thread):
         self.start()
 
     def writeData(self, str):
-        self.serialLock.acquire()
-        try:
-            self.ser.write(str.encode('utf-8'))
-        finally:
-            self.serialLock.release()
+        self.txQueue.put(str)
 
     def processLine(self, line):
         parts = list(map(str.strip, line.split(',')))
@@ -47,24 +44,19 @@ class LutronRS232(threading.Thread):
             if parts[0] == "DL":
                 self.cachedValues[normalizeAddress(parts[1])] = int(parts[2])
 
-    def read(self):
-        if (self.ser.inWaiting()>0):
-            self.bufferedRead += self.ser.read(self.ser.inWaiting()).decode('ascii')
-        index = self.bufferedRead.find('\r')
-        while index != -1:
-            self.processLine(self.bufferedRead[:index])
-            self.bufferedRead = self.bufferedRead[index+1:]
-            index = self.bufferedRead.find('\r')
-
     def run(self):
         while not self.stopEvent.isSet():
-            self.serialLock.acquire()
-            try:
-                self.read()
-            finally:
-                self.serialLock.release()
-            
+            while self.ser.inWaiting()>0:
+                self.bufferedRead += self.ser.read(self.ser.inWaiting()).decode('ascii')
+            index = self.bufferedRead.find('\r')
+            while index != -1:
+                self.processLine(self.bufferedRead[:index])
+                self.bufferedRead = self.bufferedRead[index+1:]
+                index = self.bufferedRead.find('\r')
 
+            while not self.txQueue.empty():
+                self.ser.write(self.txQueue.get().encode('utf-8'))
+            
     def setBrightness(self, address, brightness, fadeTime=1, delayTime=0):
         addressNormalized = normalizeAddress(address)
         self.writeData('FADEDIM,'+str(brightness)+','+str(fadeTime)+','+str(delayTime)+','+addressNormalized+'\r\n')
@@ -74,26 +66,16 @@ class LutronRS232(threading.Thread):
         else:
             self.cachedValues[addressNormalized] = int(brightness)
 
-    def forceBrightnessUpdate(self, address, waitTime=0):
+    def forceBrightnessUpdate(self, address):
         self.writeData('RDL,'+normalizeAddress(address)+'\r\n')
-        time.sleep(waitTime)
 
     def getBrightness(self, address, timeout=2):
-        # I think accessing cachedValues is safe, because of this:
-        # "Python's built-in data structures (lists, dictionaries, etc.) are thread-safe as a side-effect of having atomic byte-codes for manipulating them"
-        # https://pymotw.com/2/threading/#controlling-access-to-resources
-        #
-        # Also I only ever read in this thread, all writing is done in the other thread
         addressNormalized = normalizeAddress(address)
         if addressNormalized not in self.cachedValues:
-            self.serialLock.acquire()
-            try:
-                self.ser.write(('RDL,'+addressNormalized+'\r\n').encode('utf-8'))
-                startTime = time.time()
-                while addressNormalized not in self.cachedValues and time.time() < startTime+timeout:
-                    self.read()
-            finally:
-                self.serialLock.release()
+            self.forceBrightnessUpdate(address)
+            startTime = time.time()
+            while addressNormalized not in self.cachedValues and time.time() < startTime+timeout:
+                time.sleep(0.01)
 
             if addressNormalized not in self.cachedValues:
                 raise RuntimeError("Couldn't get brightness for address "+addressNormalized)
@@ -101,10 +83,10 @@ class LutronRS232(threading.Thread):
 
     def stop(self):
         self.stopEvent.set()
+        self.join()
 
 if __name__ == "__main__":
     lutron = LutronRS232('/dev/tty.usbserial')
-    time.sleep(2)
     lutron.setBrightness('1.4.2.7.3', 0)
     time.sleep(2)
     lutron.setBrightness('1.4.2.7.3', 50)
