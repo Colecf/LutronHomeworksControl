@@ -18,16 +18,6 @@ ADDRESS_STR = '('+ENCLOSED_ADDRESS_STR+'|(?:\['+ENCLOSED_ADDRESS_STR+'\]))'
 MQTT_DIMMER_STATE = re.compile('homeworks/dimmer/'+ADDRESS_STR+'/state')
 MQTT_DIMMER_COMMAND = re.compile('homeworks/dimmer/'+ADDRESS_STR+'/command')
 
-
-def brightnessChanged(address, brightness):
-    payload = json.dumps({
-        "state": "ON" if brightness > 0 else "OFF",
-        "brightness": brightness
-    })
-    topic = 'homeworks/dimmer/'+address+'/state'
-    print("Sending on topic "+topic+": "+payload)
-    mqtt.publish(topic, payload)
-
 def onMqttDisconnect(client, lutron, rc):
     print('Disconnected!')
 #    # Disconnected because we called disconnect()
@@ -43,14 +33,20 @@ def onMqttDisconnect(client, lutron, rc):
 #        time.sleep(5)
 
 def onMqttMessage(client, lutron, message):
-    print(message.topic+": "+message.payload)
+    print('Received: '+message.topic+": "+str(message.payload))
     match = MQTT_DIMMER_COMMAND.match(message.topic)
     if match:
-        lutron.setBrightness(match.group(0), json.loads(message.payload).brightness)
+        payload = json.loads(message.payload)
+        if 'brightness' not in payload:
+            payload['brightness'] = 100 if payload['state'] == 'ON' else 0
+        lutron.setBrightness(match.group(1), payload['brightness'])
 
 def onMqttConnect(client, lutron, flags, rc):
     print('Connected!')
     client.subscribe('homeworks/dimmer/#')
+
+def onMqttSubscribe(client, lutron, mid, granted_qos):
+    print("Subscribed", mid, granted_qos)
 
 parser = argparse.ArgumentParser(description='Lutron Homeworks MQTT client')
 parser.add_argument('serial_interface')
@@ -66,16 +62,27 @@ args = parser.parse_args()
 #    args.address[i] = 
 
 lutron = hw.LutronRS232(args.serial_interface, args.baudrate)
-lutron.brightnessChangedCallback = brightnessChanged
 
 mqtt = mqttlib.Client(userdata=lutron)
+
+def brightnessChanged(address, brightness):
+    payload = json.dumps({
+        "state": "ON" if brightness > 0 else "OFF",
+        "brightness": brightness
+    })
+    topic = 'homeworks/dimmer/'+address+'/state'
+    print("Sending on topic "+topic+": "+payload)
+    mqtt.publish(topic, payload)
+
+lutron.brightnessChangedCallback = brightnessChanged
+
 if args.username is not None:
     mqtt.username_pw_set(args.username, args.password)
 
 mqtt.on_disconnect = onMqttDisconnect
 mqtt.on_message = onMqttMessage
 mqtt.on_connect = onMqttConnect
+mqtt.on_subscribe = onMqttSubscribe
 mqtt.connect(args.broker_ip, args.broker_port)
 
 mqtt.loop_forever()
-
