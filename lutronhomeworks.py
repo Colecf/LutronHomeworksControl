@@ -27,6 +27,7 @@ def normalizeAddress(address):
 class LutronRS232(threading.Thread):
     def __init__(self, file, baudrate=115200):
         threading.Thread.__init__(self)
+        self.daemon = True
         self.ser = serial.Serial(file, baudrate, timeout=0.5)
         self.txQueue = queue.Queue()
         self.stopEvent = threading.Event()
@@ -99,7 +100,7 @@ class LutronRS232(threading.Thread):
         self.join()
 
 if __name__ == "__main__":
-    lutron = LutronRS232('/dev/tty.usbserial')
+    lutron = LutronRS232('/dev/ttyUSB0')
     lutron.brightnessChangedCallback = lambda address, brightness: print(address+": "+str(brightness))
     lutron.setBrightness('1.4.2.7.3', 0)
     time.sleep(2)
