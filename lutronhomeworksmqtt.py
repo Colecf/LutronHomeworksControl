@@ -33,10 +33,10 @@ def onMqttDisconnect(client, lutron, rc):
 #        time.sleep(5)
 
 def onMqttMessage(client, lutron, message):
-    print('Received: '+message.topic+": "+str(message.payload))
+    print('Received: '+message.topic+": "+message.payload.decode())
     match = MQTT_DIMMER_COMMAND.match(message.topic)
     if match:
-        payload = json.loads(message.payload)
+        payload = json.loads(message.payload.decode())
         if 'brightness' not in payload:
             payload['brightness'] = 100 if payload['state'] == 'ON' else 0
         lutron.setBrightness(match.group(1), payload['brightness'])
