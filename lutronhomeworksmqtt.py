@@ -6,17 +6,21 @@ import socket
 import json
 import sys
 
-# addresses as documented under "Device Address Formatting" of
-# this pdf: http://www.lutron.com/TechnicalDocumentLibrary/HWI%20RS232%20Protocol.pdf
-# Except don't use this, use only the format of numbers without leading zeros seperated by :'s,
-# without brackets. This is because addresses get normalized in order to be exactly the same
-# so we can use them as dictionary keys
-NUM_OR_SPACE_STR = '(?:[0-9]+[ ]*)+'
-ENCLOSED_ADDRESS_STR = '(?:'+NUM_OR_SPACE_STR+'(?:[.:\\/-]'+NUM_OR_SPACE_STR+')*)'
-ADDRESS_STR = '('+ENCLOSED_ADDRESS_STR+'|(?:\['+ENCLOSED_ADDRESS_STR+'\]))'
+# addresses are colon separated numbers
+# don't use leading zeros, addresses must be exactly this format
+# as we use them as dictionary keys
+NUMBER = '(?:0|(?:[1-9][0-9]*))'
+ADDRESS_STR = '('+NUMBER+'(?:[:]'+NUMBER+')*)'
 MQTT_DIMMER_STATE = re.compile('homeworks/dimmer/'+ADDRESS_STR+'/state')
 MQTT_DIMMER_COMMAND = re.compile('homeworks/dimmer/'+ADDRESS_STR+'/command')
 
+def onMqttConnect(client, lutron, flags, rc):
+    print('Connected!')
+    client.subscribe('homeworks/dimmer/#')
+
+def onMqttSubscribe(client, lutron, mid, granted_qos):
+    print("Subscribed", mid, granted_qos)
+    
 def onMqttDisconnect(client, lutron, rc):
     print('Disconnected!')
 
@@ -30,12 +34,14 @@ def onMqttMessage(client, lutron, message):
         payload['brightness'] = int(payload['brightness'] / 255 * 100)
         lutron.setBrightness(match.group(1), payload['brightness'])
 
-def onMqttConnect(client, lutron, flags, rc):
-    print('Connected!')
-    client.subscribe('homeworks/dimmer/#')
-
-def onMqttSubscribe(client, lutron, mid, granted_qos):
-    print("Subscribed", mid, granted_qos)
+def brightnessChanged(mqtt, address, brightness):
+    payload = json.dumps({
+        "state": "ON" if brightness > 0 else "OFF",
+        "brightness": int(brightness / 100 * 255)
+    })
+    topic = 'homeworks/dimmer/'+address+'/state'
+    print("Sending on topic "+topic+": "+payload)
+    mqtt.publish(topic, payload, retain=True)
 
 parser = argparse.ArgumentParser(description='Lutron Homeworks MQTT client')
 parser.add_argument('serial_interface')
@@ -47,19 +53,8 @@ parser.add_argument('-B', '--baudrate', default=115200, type=int)
 args = parser.parse_args()
 
 lutron = hw.LutronRS232(args.serial_interface, args.baudrate)
-
 mqtt = mqttlib.Client(userdata=lutron)
-
-def brightnessChanged(address, brightness):
-    payload = json.dumps({
-        "state": "ON" if brightness > 0 else "OFF",
-        "brightness": int(brightness / 100 * 255)
-    })
-    topic = 'homeworks/dimmer/'+address+'/state'
-    print("Sending on topic "+topic+": "+payload)
-    mqtt.publish(topic, payload, retain=True)
-
-lutron.brightnessChangedCallback = brightnessChanged
+lutron.brightnessChangedCallback = lambda addr, brightness: brightnessChanged(mqtt, addr, brightness)
 
 if args.username is not None:
     mqtt.username_pw_set(args.username, args.password)
