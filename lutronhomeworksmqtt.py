@@ -14,6 +14,8 @@ ADDRESS_STR = '('+NUMBER+'(?:[:]'+NUMBER+')*)'
 MQTT_DIMMER_STATE = re.compile('homeworks/dimmer/'+ADDRESS_STR+'/state')
 MQTT_DIMMER_COMMAND = re.compile('homeworks/dimmer/'+ADDRESS_STR+'/command')
 
+oldBrightnesses = {}
+
 def onMqttConnect(client, lutron, flags, rc):
     print('Connected!')
     client.subscribe('homeworks/dimmer/#')
@@ -29,10 +31,17 @@ def onMqttMessage(client, lutron, message):
     match = MQTT_DIMMER_COMMAND.match(message.topic)
     if match:
         payload = json.loads(message.payload.decode())
+        address = match.group(1)
         if 'brightness' not in payload:
-            payload['brightness'] = 255 if payload['state'] == 'ON' else 0
+            if payload['state'] == 'ON':
+                if address in oldBrightnesses:
+                    payload['brightness'] = oldBrightnesses[address]*255/100
+                else:
+                    payload['brightness'] = 255
+            else:
+                payload['brightness'] = 0
         payload['brightness'] = int(payload['brightness'] / 255 * 100)
-        lutron.setBrightness(match.group(1), payload['brightness'])
+        lutron.setBrightness(address, payload['brightness'])
 
 def brightnessChanged(mqtt, address, brightness):
     payload = json.dumps({
@@ -42,6 +51,14 @@ def brightnessChanged(mqtt, address, brightness):
     topic = 'homeworks/dimmer/'+address+'/state'
     print("Sending on topic "+topic+": "+payload)
     mqtt.publish(topic, payload, retain=True)
+
+    # Hack to deal with improperly wired lights that
+    # flicker between 0 and a low value (3 in our case)
+    # Can also be nice to not save a super low value
+    # so you don't think it didn't actually turn on
+    # when in turns on very slightly
+    if brightness >= 5:
+        oldBrightnesses[address] = brightness
 
 parser = argparse.ArgumentParser(description='Lutron Homeworks MQTT client')
 parser.add_argument('serial_interface')
