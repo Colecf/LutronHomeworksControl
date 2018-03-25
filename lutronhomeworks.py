@@ -74,6 +74,9 @@ class LutronRS232(threading.Thread):
 
             while not self.txQueue.empty():
                 self.ser.write(self.txQueue.get().encode('utf-8'))
+
+            # Potentially makes this thread nicer to others?
+            time.sleep(0)
             
     def setBrightness(self, address, brightness, fadeTime=1, delayTime=0):
         addressNormalized = normalizeAddress(address)
