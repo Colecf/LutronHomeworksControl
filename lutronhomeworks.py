@@ -78,7 +78,7 @@ class LutronRS232(threading.Thread):
     def setBrightness(self, address, brightness, fadeTime=1, delayTime=0):
         addressNormalized = normalizeAddress(address)
         self.writeData('FADEDIM,'+str(brightness)+','+str(fadeTime)+','+str(delayTime)+','+addressNormalized+'\r\n')
-        self.setCachedBrightness(address, brightness)
+        self.setCachedBrightness(addressNormalized, brightness)
 
     def forceBrightnessUpdate(self, address):
         self.writeData('RDL,'+normalizeAddress(address)+'\r\n')
